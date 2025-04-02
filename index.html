@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Geometry Dash</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            background-color: #111;
+            overflow: hidden;
+        }
+        
+        #background {
+            position: absolute;
+            width: 200%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                #1a1a2e 0%, #16213e 20%, #0f3460 40%, #533483 60%, #1a1a2e 80%, #16213e 100%);
+            background-size: 200% 100%;
+            animation: backgroundScroll 20s linear infinite;
+            z-index: 0;
+        }
+        
+        @keyframes backgroundScroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        
+        #player {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background-color: #00a2ff;
+            bottom: 0;
+            left: 100px;
+            z-index: 10;
+            transition: transform 0.1s;
+        }
+        
+        .obstacle {
+            position: absolute;
+            width: 30px;
+            height: 60px;
+            background-color: #ff5555;
+            bottom: 0;
+            z-index: 5;
+        }
+        
+        .friend {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: #55ff55;
+            border-radius: 50%;
+            bottom: 100px;
+            z-index: 5;
+        }
+        
+        #ground {
+            position: absolute;
+            width: 100%;
+            height: 20px;
+            background-color: #555;
+            bottom: 0;
+            z-index: 5;
+        }
+        
+        #score {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            font-size: 24px;
+            z-index: 20;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        #friendsCount {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            color: white;
+            font-size: 24px;
+            z-index: 20;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            display: none;
+            z-index: 20;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        #restartBtn {
+            position: absolute;
+            top: 60%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 20px;
+            background-color: #00a2ff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            display: none;
+            z-index: 20;
+        }
+        
+        .friend-collected {
+            animation: collectAnimation 0.5s ease-out;
+        }
+        
+        @keyframes collectAnimation {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(3); opacity: 0; }
+        }
+        
+        .jump-effect {
+            transform: scale(0.9, 1.1);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="background"></div>
+        <div id="player"></div>
+        <div id="ground"></div>
+        <div id="score">0</div>
+        <div id="friendsCount">Friends: 0</div>
+        <div id="gameOver">Game Over</div>
+        <button id="restartBtn">Restart</button>
+    </div>
+
+    <script>
+        const player = document.getElementById('player');
+        const gameContainer = document.getElementById('gameContainer');
+        const scoreElement = document.getElementById('score');
+        const friendsCountElement = document.getElementById('friendsCount');
+        const gameOverElement = document.getElementById('gameOver');
+        const restartBtn = document.getElementById('restartBtn');
+        
+        // Game state
+        let isJumping = false;
+        let isGameOver = false;
+        let isDucking = false;
+        let score = 0;
+        let friendsCollected = 0;
+        let gravity = 0.9;
+        let playerY = 0;
+        let playerVelocity = 0;
+        let jumpForce = 15;
+        let obstacles = [];
+        let friends = [];
+        let gameSpeed = 5;
+        let obstacleInterval;
+        let friendInterval;
+        
+        // Improved jump variables
+        let jumpStartTime = 0;
+        let maxJumpDuration = 500; // ms
+        let minJumpForce = 1233.4;
+        let maxJumpForce = 10000;
+        let isHoldingJump = false;
+        
+        // Start game
+        function startGame() {
+            isGameOver = false;
+            score = 0;
+            friendsCollected = 0;
+            scoreElement.textContent = score;
+            friendsCountElement.textContent = `Friends: ${friendsCollected}`;
+            playerY = 0;
+            playerVelocity = 0;
+            player.style.bottom = playerY + 'px';
+            player.style.transform = 'scale(1)';
+            
+            // Clear all obstacles and friends
+            obstacles.forEach(obstacle => obstacle.element.remove());
+            obstacles = [];
+            friends.forEach(friend => friend.element.remove());
+            friends = [];
+            
+            gameOverElement.style.display = 'none';
+            restartBtn.style.display = 'none';
+            
+            // Start obstacle and friend generation
+            obstacleInterval = setInterval(createObstacle, 2000);
+            friendInterval = setInterval(createFriend, 3000);
+            
+            // Start game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Game loop
+        function gameLoop() {
+            if (isGameOver) return;
+            
+            updatePlayer();
+            updateObstacles();
+            updateFriends();
+            checkCollisions();
+            updateScore();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Update player position with improved jumping
+        function updatePlayer() {
+            if (isJumping) {
+                // Apply gravity
+                playerY += playerVelocity;
+                playerVelocity -= gravity;
+                
+                // Squash effect when falling
+                if (playerVelocity < 0) {
+                    player.style.transform = `scale(${1 - playerVelocity * 0.01}, ${1 + playerVelocity * 0.01})`;
+                }
+                
+                // Land on ground
+                if (playerY <= 0) {
+                    playerY = 0;
+                    isJumping = false;
+                    playerVelocity = 0;
+                    player.style.transform = 'scale(1)';
+                }
+                
+                player.style.bottom = playerY + 'px';
+            }
+        }
+        
+        // Create new obstacle
+        function createObstacle() {
+            if (isGameOver) return;
+            
+            const obstacle = document.createElement('div');
+            obstacle.className = 'obstacle';
+            obstacle.style.right = '0px';
+            gameContainer.appendChild(obstacle);
+            
+            obstacles.push({
+                element: obstacle,
+                x: gameContainer.offsetWidth,
+                width: 30,
+                height: 60 + Math.random() * 60
+            });
+        }
+        
+        // Create new friend
+        function createFriend() {
+            if (isGameOver) return;
+            
+            const friend = document.createElement('div');
+            friend.className = 'friend';
+            friend.style.right = '0px';
+            gameContainer.appendChild(friend);
+            
+            friends.push({
+                element: friend,
+                x: gameContainer.offsetWidth,
+                width: 40,
+                height: 40,
+                y: 80 + Math.random() * 150 // Random vertical position
+            });
+        }
+        
+        // Update obstacles position
+        function updateObstacles() {
+            obstacles.forEach((obstacle, index) => {
+                obstacle.x -= gameSpeed;
+                obstacle.element.style.right = (gameContainer.offsetWidth - obstacle.x) + 'px';
+                
+                // Remove obstacle when it's off screen
+                if (obstacle.x + obstacle.width < 0) {
+                    obstacle.element.remove();
+                    obstacles.splice(index, 1);
+                }
+            });
+        }
+        
+        // Update friends position
+        function updateFriends() {
+            friends.forEach((friend, index) => {
+                friend.x -= gameSpeed;
+                friend.element.style.right = (gameContainer.offsetWidth - friend.x) + 'px';
+                friend.element.style.bottom = friend.y + 'px';
+                
+                // Remove friend when it's off screen
+                if (friend.x + friend.width < 0) {
+                    friend.element.remove();
+                    friends.splice(index, 1);
+                }
+            });
+        }
+        
+        // Check for collisions
+        function checkCollisions() {
+            const playerRect = {
+                x: 100,
+                y: gameContainer.offsetHeight - playerY - 50,
+                width: 50,
+                height: 50
+            };
+            
+            // Check obstacle collisions
+            obstacles.forEach(obstacle => {
+                const obstacleRect = {
+                    x: obstacle.x,
+                    y: gameContainer.offsetHeight - obstacle.height,
+                    width: obstacle.width,
+                    height: obstacle.height
+                };
+                
+                if (
+                    playerRect.x < obstacleRect.x + obstacleRect.width &&
+                    playerRect.x + playerRect.width > obstacleRect.x &&
+                    playerRect.y < obstacleRect.y + obstacleRect.height &&
+                    playerRect.y + playerRect.height > obstacleRect.y
+                ) {
+                    gameOver();
+                }
+            });
+            
+            // Check friend collisions
+            friends.forEach((friend, index) => {
+                const friendRect = {
+                    x: friend.x,
+                    y: gameContainer.offsetHeight - friend.y - friend.height,
+                    width: friend.width,
+                    height: friend.height
+                };
+                
+                if (
+                    playerRect.x < friendRect.x + friendRect.width &&
+                    playerRect.x + playerRect.width > friendRect.x &&
+                    playerRect.y < friendRect.y + friendRect.height &&
+                    playerRect.y + playerRect.height > friendRect.y
+                ) {
+                    // Collect friend
+                    friend.element.classList.add('friend-collected');
+                    friendsCollected++;
+                    friendsCountElement.textContent = `Friends: ${friendsCollected}`;
+                    
+                    // Add bonus points
+                    score += 50;
+                    
+                    // Remove friend after animation
+                    setTimeout(() => {
+                        friend.element.remove();
+                        friends.splice(index, 1);
+                    }, 500);
+                }
+            });
+        }
+        
+        // Update score
+        function updateScore() {
+            score++;
+            scoreElement.textContent = Math.floor(score / 10);
+            
+            // Increase game speed as score increases
+            if (score % 500 === 0) {
+                gameSpeed += 0.5;
+            }
+        }
+        
+        // Game over
+        function gameOver() {
+            isGameOver = true;
+            clearInterval(obstacleInterval);
+            clearInterval(friendInterval);
+            gameOverElement.style.display = 'block';
+            restartBtn.style.display = 'block';
+        }
+        
+        // Start jump
+        function startJump() {
+            if (!isJumping && !isGameOver) {
+                isJumping = true;
+                isHoldingJump = true;
+                jumpStartTime = Date.now();
+                playerVelocity = minJumpForce;
+                player.classList.add('jump-effect');
+            }
+        }
+        
+        // Continue jump while key is held
+        function continueJump() {
+            if (isHoldingJump && isJumping) {
+                const jumpDuration = Date.now() - jumpStartTime;
+                const jumpProgress = Math.min(jumpDuration / maxJumpDuration, 1);
+                
+                // Calculate jump force based on how long the key is held
+                playerVelocity = minJumpForce + (maxJumpForce - minJumpForce) * jumpProgress;
+                
+                if (jumpProgress >= 1) {
+                    isHoldingJump = false;
+                }
+            }
+        }
+        
+        // End jump
+        function endJump() {
+            isHoldingJump = false;
+            player.classList.remove('jump-effect');
+        }
+        
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            if ((e.code === 'Space' || e.key === 'ArrowUp') && !isJumping) {
+                startJump();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space' || e.key === 'ArrowUp') {
+                endJump();
+            }
+        });
+        
+        gameContainer.addEventListener('mousedown', () => {
+            if (!isJumping) startJump();
+        });
+        
+        gameContainer.addEventListener('mouseup', endJump);
+        gameContainer.addEventListener('mouseleave', endJump);
+        
+        restartBtn.addEventListener('click', startGame);
+        
+        // Continue jump in game loop
+        function gameLoop() {
+            if (isGameOver) return;
+            
+            continueJump();
+            updatePlayer();
+            updateObstacles();
+            updateFriends();
+            checkCollisions();
+            updateScore();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        startGame();
+    </script>
+</body>
+</html>
